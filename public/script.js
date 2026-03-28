@@ -35,11 +35,11 @@ const pageRect = document.getElementById("pageRect");
 const placedGroup = document.getElementById("placed");
 
 // ---------------------- State ----------------------
-let allFiles = []; // from server
+let allFiles = [];
 let filteredFiles = [];
-let queue = new Map(); // id -> {file, pcs, thumbDataUrl, svgText, meta}
+let queue = new Map();
 
-let lastLayoutSvg = null; // string SVG output (for download)
+let lastLayoutSvg = null;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -87,7 +87,10 @@ function updatePageRect() {
 }
 
 function applyViewportTransform() {
-  viewport.setAttribute("transform", `translate(${panX} ${panY}) scale(${zoom})`);
+  viewport.setAttribute(
+    "transform",
+    `translate(${panX} ${panY}) scale(${zoom})`,
+  );
   zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
 }
 
@@ -100,7 +103,6 @@ function clearPlaced() {
 }
 
 function encodeSvgToDataUrl(svgText) {
-  // aman untuk img src
   const encoded = encodeURIComponent(svgText)
     .replace(/'/g, "%27")
     .replace(/"/g, "%22");
@@ -139,9 +141,7 @@ async function loadFiles(cat = "all") {
 }
 
 function rebuildSuggestions(files) {
-  // datalist suggestions (buat pencarian cepat saat file banyak)
   suggestions.innerHTML = "";
-  // batas biar ringan (kalau file ribuan)
   const MAX = 4000;
   for (const f of files.slice(0, MAX)) {
     const opt = document.createElement("option");
@@ -155,15 +155,15 @@ function applyFilter() {
   const q = (searchInput.value || "").trim().toLowerCase();
   filteredFiles = allFiles.filter((f) => {
     if (!q) return true;
-    // match: nama file atau path
-    return f.name.toLowerCase().includes(q) || f.relPath.toLowerCase().includes(q);
+    return (
+      f.name.toLowerCase().includes(q) || f.relPath.toLowerCase().includes(q)
+    );
   });
   renderGallery(filteredFiles);
 }
 
 async function renderGallery(files) {
   gallery.innerHTML = "";
-
   const frag = document.createDocumentFragment();
   for (const f of files) {
     const card = document.createElement("div");
@@ -172,15 +172,15 @@ async function renderGallery(files) {
 
     const imgWrap = document.createElement("div");
     imgWrap.className = "img";
-
     const img = document.createElement("img");
     img.alt = f.name;
 
-    // thumbnail: ambil svg text lalu jadikan data url (cache per file)
     let thumbUrl = f._thumbUrl;
     if (!thumbUrl) {
       try {
-        const svgText = await fetchText(`/api/svg?path=${encodeURIComponent(f.relPath)}`);
+        const svgText = await fetchText(
+          `/api/svg?path=${encodeURIComponent(f.relPath)}`,
+        );
         thumbUrl = encodeSvgToDataUrl(svgText);
         f._thumbUrl = thumbUrl;
         f._svgText = svgText;
@@ -203,9 +203,7 @@ async function renderGallery(files) {
     card.appendChild(imgWrap);
     card.appendChild(name);
     card.appendChild(meta);
-
     card.addEventListener("click", () => addToQueue(f));
-
     frag.appendChild(card);
   }
   gallery.appendChild(frag);
@@ -215,7 +213,6 @@ async function renderGallery(files) {
 async function addToQueue(file) {
   const id = file.id;
   if (queue.has(id)) {
-    // kalau sudah ada, tambahin pcs 1
     const it = queue.get(id);
     it.pcs += 1;
     queue.set(id, it);
@@ -225,23 +222,19 @@ async function addToQueue(file) {
   }
 
   let svgText = file._svgText;
-  if (!svgText) svgText = await fetchText(`/api/svg?path=${encodeURIComponent(file.relPath)}`);
+  if (!svgText)
+    svgText = await fetchText(
+      `/api/svg?path=${encodeURIComponent(file.relPath)}`,
+    );
   const thumbUrl = file._thumbUrl || encodeSvgToDataUrl(svgText);
 
-  queue.set(id, {
-    file,
-    pcs: 1,
-    thumbUrl,
-    svgText
-  });
-
+  queue.set(id, { file, pcs: 1, thumbUrl, svgText });
   renderQueue();
   showToast(`Ditambahkan ke queue: ${file.name}`);
 }
 
 function renderQueue() {
   queueList.innerHTML = "";
-
   const items = Array.from(queue.values());
 
   if (items.length === 0) {
@@ -251,7 +244,6 @@ function renderQueue() {
 
   for (const item of items) {
     const { file } = item;
-
     const row = document.createElement("div");
     row.className = "queue-item";
 
@@ -300,72 +292,41 @@ function renderQueue() {
     row.appendChild(info);
     row.appendChild(pcs);
     row.appendChild(del);
-
     queueList.appendChild(row);
   }
 }
 
-// ---------------------- SVG parsing & id prefixing ----------------------
-function getInnerSvgContent(svgText) {
-  // Buang wrapper <svg ...> ... </svg>, ambil inner markup.
-  // (Tetap biarkan <defs> di dalam, nanti kita prefix id)
-  const m = svgText.match(/<svg\b[^>]*>([\s\S]*?)<\/svg>/i);
-  if (m) return m[1];
-  return svgText; // fallback
-}
-
 function extractMetaFromSvgText(svgText) {
-  // minimal meta untuk scale & unit mapping.
-  // Supaya presisi, kita pakai DOMParser.
   const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
-  const svg = doc.documentElement;
+  const root = doc.documentElement;
 
-  const vb = svg.getAttribute("viewBox");
-  let vbW = null, vbH = null;
+  let vbX = 0,
+    vbY = 0,
+    vbW = null,
+    vbH = null;
+  const vb = root.getAttribute("viewBox");
+
   if (vb) {
-    const parts = vb.trim().split(/[\s,]+/).map(Number);
-    if (parts.length === 4 && parts.every((n) => isFinite(n))) {
-      vbW = parts[2];
-      vbH = parts[3];
+    const parts = vb
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    if (parts.length === 4 && parts.every(isFinite)) {
+      [vbX, vbY, vbW, vbH] = parts;
     }
   }
 
-  const wAttr = svg.getAttribute("width");
-  const hAttr = svg.getAttribute("height");
+  const wMm = parseLengthToMmClient(root.getAttribute("width"));
+  const hMm = parseLengthToMmClient(root.getAttribute("height"));
 
-  const wMm = parseLengthToMmClient(wAttr);
-  const hMm = parseLengthToMmClient(hAttr);
-
-  // return mmPerUnit + wMm/hMm
-  let mmPerUnit = null;
-  let outWMm = null;
-  let outHMm = null;
-
-  if (vbW && vbH && wMm && hMm) {
-    mmPerUnit = wMm / vbW;
-    outWMm = wMm;
-    outHMm = hMm;
-  } else if (vbW && vbH && wMm && !hMm) {
-    mmPerUnit = wMm / vbW;
-    outWMm = wMm;
-    outHMm = vbH * mmPerUnit;
-  } else if (vbW && vbH && !wMm && hMm) {
-    mmPerUnit = hMm / vbH;
-    outHMm = hMm;
-    outWMm = vbW * mmPerUnit;
-  } else if (vbW && vbH) {
-    // assume px @96dpi
-    const PX_TO_MM = 25.4 / 96;
-    mmPerUnit = PX_TO_MM;
-    outWMm = vbW * mmPerUnit;
-    outHMm = vbH * mmPerUnit;
-  } else if (wMm && hMm) {
-    mmPerUnit = null;
-    outWMm = wMm;
-    outHMm = hMm;
-  }
-
-  return { vbW, vbH, mmPerUnit, wMm: outWMm, hMm: outHMm };
+  return {
+    vbX,
+    vbY,
+    vbW,
+    vbH,
+    wMm: wMm || (vbW ? vbW * (25.4 / 96) : null),
+    hMm: hMm || (vbH ? vbH * (25.4 / 96) : null),
+  };
 }
 
 function parseLengthToMmClient(lenStr) {
@@ -379,46 +340,112 @@ function parseLengthToMmClient(lenStr) {
 
   const PX_TO_MM = 25.4 / 96;
   switch (unit) {
-    case "mm": return val;
-    case "cm": return val * 10;
-    case "in": return val * 25.4;
-    case "pt": return (val * 25.4) / 72;
+    case "mm":
+      return val;
+    case "cm":
+      return val * 10;
+    case "in":
+      return val * 25.4;
+    case "pt":
+      return (val * 25.4) / 72;
     case "px":
-    default: return val * PX_TO_MM;
+    default:
+      return val * PX_TO_MM;
   }
 }
 
-function prefixSvgIds(innerMarkup, prefix) {
-  // prefix id="x" and url(#x) and href="#x"
-  // Ini sederhana tapi efektif untuk mayoritas SVG produksi.
-  // (Kalau ada kasus super kompleks, nanti kita upgrade ke parser-based rewrite.)
-  let out = innerMarkup;
+function isolateSvg(svgText, prefix, xMm, yMm, targetWMm, targetHMm) {
+  const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const root = doc.documentElement;
 
-  // id="..."
-  out = out.replace(/\bid\s*=\s*["']([^"']+)["']/gi, (m, id) => {
-    return `id="${prefix}_${id}"`;
+  if (!root || root.tagName.toLowerCase() !== "svg") return "";
+
+  root.querySelectorAll("metadata, title, desc").forEach((el) => el.remove());
+
+  root.querySelectorAll("*").forEach((el) => {
+    const attrs = Array.from(el.attributes);
+    for (const attr of attrs) {
+      if (
+        attr.name.startsWith("inkscape:") ||
+        attr.name.startsWith("sodipodi:") ||
+        attr.name.startsWith("data-")
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
   });
 
-  // url(#...)
-  out = out.replace(/url\(\s*#([^)]+)\s*\)/gi, (m, id) => {
-    return `url(#${prefix}_${id})`;
+  root.querySelectorAll("image, use").forEach((el) => {
+    const href = el.getAttribute("href");
+    if (href) {
+      el.setAttribute("xlink:href", href);
+      el.removeAttribute("href");
+    }
   });
 
-  // href="#..."
-  out = out.replace(/\b(xlink:href|href)\s*=\s*["']#([^"']+)["']/gi, (m, attr, id) => {
-    return `${attr}="#${prefix}_${id}"`;
+  root.querySelectorAll("[id]").forEach((el) => {
+    const oldId = el.getAttribute("id");
+    if (oldId) el.setAttribute("id", `${prefix}_${oldId}`);
   });
 
-  // CSS selectors #id (basic)
-  out = out.replace(/(#)([A-Za-z_][\w:.-]*)/g, (m, hash, id) => {
-    // cegah false-positive yang bukan id (tapi ini cukup aman untuk kebanyakan inline style)
-    return `${hash}${prefix}_${id}`;
+  root.querySelectorAll("[class]").forEach((el) => {
+    const oldClass = el.getAttribute("class");
+    if (oldClass) {
+      const newClass = oldClass
+        .trim()
+        .split(/\s+/)
+        .map((c) => `${prefix}_${c}`)
+        .join(" ");
+      el.setAttribute("class", newClass);
+    }
   });
 
-  return out;
+  root.querySelectorAll("style").forEach((style) => {
+    if (style.textContent) {
+      style.textContent = style.textContent
+        .replace(/\.([a-zA-Z0-9_-]+)/g, `.${prefix}_$1`)
+        .replace(/#([a-zA-Z0-9_-]+)/g, `#${prefix}_$1`);
+    }
+  });
+
+  let innerContent = root.innerHTML;
+
+  innerContent = innerContent.replace(
+    /url\(\s*['"]?#([^)'"]+)['"]?\s*\)/gi,
+    `url(#${prefix}_$1)`,
+  );
+  innerContent = innerContent.replace(
+    /(xlink:href|href)\s*=\s*["']#([^"']+)["']/gi,
+    `$1="#${prefix}_$2"`,
+  );
+
+  let vbX = 0,
+    vbY = 0,
+    vbW = targetWMm,
+    vbH = targetHMm;
+
+  const vb = root.getAttribute("viewBox");
+
+  if (vb) {
+    const parts = vb
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    if (parts.length === 4 && parts.every(isFinite)) {
+      [vbX, vbY, vbW, vbH] = parts;
+    }
+  } else {
+    const wAttr = parseFloat(root.getAttribute("width"));
+    const hAttr = parseFloat(root.getAttribute("height"));
+    if (!isNaN(wAttr) && !isNaN(hAttr)) {
+      vbW = wAttr;
+      vbH = hAttr;
+    }
+  }
+
+  return `<svg x="${xMm}" y="${yMm}" width="${targetWMm}" height="${targetHMm}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" overflow="visible">\n${innerContent}\n</svg>`;
 }
 
-// ---------------------- Packing (simple shelf packing) ----------------------
 function buildInstancesFromQueue() {
   const instances = [];
   for (const item of queue.values()) {
@@ -426,26 +453,20 @@ function buildInstancesFromQueue() {
     if (pcs <= 0) continue;
 
     const file = item.file;
-    const w = file.wMm ?? null;
-    const h = file.hMm ?? null;
-
-    if (!w || !h) {
-      // kalau ukuran tidak terbaca, coba parse dari svgText
+    if (!file.wMm || !file.hMm) {
       const meta = extractMetaFromSvgText(item.svgText);
       item.file.wMm = meta.wMm;
       item.file.hMm = meta.hMm;
-      item.file.mmPerUnit = meta.mmPerUnit;
     }
 
     for (let i = 0; i < pcs; i++) {
       instances.push({
         key: `${file.id}::${i + 1}`,
         file,
-        svgText: item.svgText
+        svgText: item.svgText,
       });
     }
   }
-  // sort by height desc (lebih rapih untuk shelf)
   instances.sort((a, b) => (b.file.hMm || 0) - (a.file.hMm || 0));
   return instances;
 }
@@ -453,10 +474,9 @@ function buildInstancesFromQueue() {
 function packShelf(instances, pageW, pageH, spacing, margin) {
   const placements = [];
   const overflow = [];
-
-  let x = margin;
-  let y = margin;
-  let rowH = 0;
+  let x = margin,
+    y = margin,
+    rowH = 0;
 
   for (const inst of instances) {
     const w = mm(inst.file.wMm);
@@ -467,74 +487,54 @@ function packShelf(instances, pageW, pageH, spacing, margin) {
       continue;
     }
 
-    // if doesn't fit on new row at all, overflow
-    if (w > (pageW - margin * 2) || h > (pageH - margin * 2)) {
+    if (w > pageW - margin * 2 || h > pageH - margin * 2) {
       overflow.push({ inst, reason: "bigger_than_canvas" });
       continue;
     }
 
-    // new row if needed
     if (x + w > pageW - margin) {
       x = margin;
       y = y + rowH + spacing;
       rowH = 0;
     }
 
-    // full
     if (y + h > pageH - margin) {
       overflow.push({ inst, reason: "canvas_full" });
       continue;
     }
 
-    placements.push({
-      inst,
-      x,
-      y,
-      w,
-      h
-    });
-
+    placements.push({ inst, x, y, w, h });
     x = x + w + spacing;
     rowH = Math.max(rowH, h);
   }
-
   return { placements, overflow };
 }
 
-// ---------------------- Render layout into preview + build output SVG string ----------------------
+// ---------------------- Render Layout & Export ----------------------
 function renderLayoutToPreview(placements, pageW, pageH) {
   clearPlaced();
   updatePageRect();
 
   const frag = document.createDocumentFragment();
-
   let count = 0;
 
   for (const p of placements) {
     const file = p.inst.file;
     const svgText = p.inst.svgText;
+    const prefix = `i${count}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // scale: map original SVG user units to mm-based canvas
-    // best effort:
-    let mmPerUnit = file.mmPerUnit;
-    if (!mmPerUnit) {
-      // parse from svgText
-      const meta = extractMetaFromSvgText(svgText);
-      mmPerUnit = meta.mmPerUnit || (25.4 / 96);
+    // Dapatkan string Grup (<g>)
+    const isolatedGroupString = isolateSvg(svgText, prefix, p.x, p.y, p.w, p.h);
+
+    // Konversi string kembali menjadi DOM yang aman untuk preview
+    const tempSvg = document.createElementNS(SVG_NS, "svg");
+    tempSvg.innerHTML = isolatedGroupString;
+    const gNode = tempSvg.firstElementChild;
+
+    if (gNode) {
+      gNode.setAttribute("data-name", file.name);
+      frag.appendChild(gNode);
     }
-
-    const inner = getInnerSvgContent(svgText);
-    const prefix = `i${count}_${Math.random().toString(16).slice(2, 8)}`;
-    const safeInner = prefixSvgIds(inner, prefix);
-
-    const g = document.createElementNS(SVG_NS, "g");
-    g.setAttribute("transform", `translate(${p.x} ${p.y}) scale(${mmPerUnit})`);
-    g.setAttribute("data-name", file.name);
-
-    // inject inner markup
-    g.innerHTML = safeInner;
-
-    frag.appendChild(g);
     count++;
   }
 
@@ -543,40 +543,22 @@ function renderLayoutToPreview(placements, pageW, pageH) {
 }
 
 function buildExportSvgString(placements, pageW, pageH) {
-  // Outer SVG in mm units (1 unit = 1mm)
-  // Inline children for Corel.
   let body = "";
   let count = 0;
 
   for (const p of placements) {
-    const file = p.inst.file;
-    const svgText = p.inst.svgText;
-
-    let mmPerUnit = file.mmPerUnit;
-    if (!mmPerUnit) {
-      const meta = extractMetaFromSvgText(svgText);
-      mmPerUnit = meta.mmPerUnit || (25.4 / 96);
-    }
-
-    const inner = getInnerSvgContent(svgText);
-    const prefix = `exp${count}_${Math.random().toString(16).slice(2, 8)}`;
-    const safeInner = prefixSvgIds(inner, prefix);
-
-    body += `\n  <g transform="translate(${p.x} ${p.y}) scale(${mmPerUnit})" data-name="${escXml(file.name)}">${safeInner}</g>\n`;
+    const prefix = `e${count}_${Math.random().toString(36).slice(2, 8)}`;
+    body += `\n  ${isolateSvg(p.inst.svgText, prefix, p.x, p.y, p.w, p.h)}`;
     count++;
   }
 
-  const out =
-`<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg"
      xmlns:xlink="http://www.w3.org/1999/xlink"
      width="${pageW}mm" height="${pageH}mm"
      viewBox="0 0 ${pageW} ${pageH}">
-  <!-- Generated by SVG Layout App (inline SVG content, no <use>, no symbols) -->
-${body}
+  ${body}
 </svg>`;
-
-  return out;
 }
 
 function downloadTextFile(filename, text) {
@@ -591,26 +573,21 @@ function downloadTextFile(filename, text) {
   URL.revokeObjectURL(url);
 }
 
-// ---------------------- Layout Action ----------------------
 function notifyOverflow(overflow) {
   if (overflow.length === 0) {
     statusBox.textContent = `✅ Layout selesai. Semua item masuk canvas.`;
     showToast("✅ Layout selesai. Semua item masuk canvas.");
     return;
   }
-
-  // hitung per file name
   const map = new Map();
   for (const o of overflow) {
     const name = o.inst.file.name;
     map.set(name, (map.get(name) || 0) + 1);
   }
-
   let msg = `⚠️ Canvas penuh / ada item tidak masuk.\n\nTidak masuk:\n`;
   for (const [name, cnt] of map.entries()) {
     msg += `- ${name}  x${cnt}\n`;
   }
-
   statusBox.textContent = msg;
   showToast(msg, 6500);
 }
@@ -618,7 +595,7 @@ function notifyOverflow(overflow) {
 function doAutoLayout() {
   const pageW = mm(canvasW.value);
   const pageH = mm(canvasH.value);
-  const spacing = mm(spacingMm.value); // 3mm default
+  const spacing = mm(spacingMm.value);
   const margin = mm(marginMm.value);
 
   if (pageW <= 0 || pageH <= 0) {
@@ -632,52 +609,47 @@ function doAutoLayout() {
     return;
   }
 
-  const { placements, overflow } = packShelf(instances, pageW, pageH, spacing, margin);
-
+  const { placements, overflow } = packShelf(
+    instances,
+    pageW,
+    pageH,
+    spacing,
+    margin,
+  );
   renderLayoutToPreview(placements, pageW, pageH);
 
   lastLayoutSvg = buildExportSvgString(placements, pageW, pageH);
   btnDownload.disabled = placements.length === 0;
-
   notifyOverflow(overflow);
 }
 
-// ---------------------- Pan/Zoom (Ctrl+Wheel, Drag pan, dblclick reset) ----------------------
-function screenToSvgDelta(dx, dy) {
-  // pan delta in screen pixels -> apply directly (we pan in svg user units after scaling?).
-  // since viewport transform is translate+scale, we can just translate by dx/zoom, dy/zoom
-  return { x: dx / zoom, y: dy / zoom };
-}
+// ---------------------- Pan/Zoom ----------------------
+stage.addEventListener(
+  "wheel",
+  (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const delta = -Math.sign(e.deltaY) * 0.08;
+    const newZoom = Math.min(8, Math.max(0.1, zoom * (1 + delta)));
 
-stage.addEventListener("wheel", (e) => {
-  // Ctrl+Wheel = zoom; Wheel normal jangan ganggu sidebar
-  if (!e.ctrlKey) return;
+    const pt = stage.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const ctm = stage.getScreenCTM();
+    if (!ctm) return;
+    const svgP = pt.matrixTransform(ctm.inverse());
 
-  e.preventDefault();
+    const k = newZoom / zoom;
+    panX = svgP.x - (svgP.x - panX) * k;
+    panY = svgP.y - (svgP.y - panY) * k;
 
-  const delta = -Math.sign(e.deltaY) * 0.08; // step
-  const newZoom = Math.min(8, Math.max(0.1, zoom * (1 + delta)));
-
-  // zoom towards mouse position
-  const pt = stage.createSVGPoint();
-  pt.x = e.clientX;
-  pt.y = e.clientY;
-  const ctm = stage.getScreenCTM();
-  if (!ctm) return;
-  const svgP = pt.matrixTransform(ctm.inverse());
-
-  // transform: translate(pan) scale(zoom)
-  // keep point stable:
-  const k = newZoom / zoom;
-  panX = svgP.x - (svgP.x - panX) * k;
-  panY = svgP.y - (svgP.y - panY) * k;
-
-  zoom = newZoom;
-  applyViewportTransform();
-}, { passive: false });
+    zoom = newZoom;
+    applyViewportTransform();
+  },
+  { passive: false },
+);
 
 stage.addEventListener("mousedown", (e) => {
-  // drag pan
   isPanning = true;
   panStart = { x: e.clientX, y: e.clientY };
   panOrigin = { x: panX, y: panY };
@@ -688,7 +660,7 @@ window.addEventListener("mousemove", (e) => {
   if (!isPanning) return;
   const dx = e.clientX - panStart.x;
   const dy = e.clientY - panStart.y;
-  const d = screenToSvgDelta(dx, dy);
+  const d = { x: dx / zoom, y: dy / zoom };
   panX = panOrigin.x + d.x;
   panY = panOrigin.y + d.y;
   applyViewportTransform();
@@ -709,12 +681,16 @@ stage.addEventListener("dblclick", () => {
 // ---------------------- UI events ----------------------
 btnCollapseLeft.addEventListener("click", () => {
   appRoot.classList.toggle("left-collapsed");
-  btnCollapseLeft.textContent = appRoot.classList.contains("left-collapsed") ? "⟩⟩" : "⟨⟨";
+  btnCollapseLeft.textContent = appRoot.classList.contains("left-collapsed")
+    ? "⟩⟩"
+    : "⟨⟨";
 });
 
 btnCollapseBottom.addEventListener("click", () => {
   appRoot.classList.toggle("bottom-collapsed");
-  btnCollapseBottom.textContent = appRoot.classList.contains("bottom-collapsed") ? "⟰" : "⟱";
+  btnCollapseBottom.textContent = appRoot.classList.contains("bottom-collapsed")
+    ? "⟰"
+    : "⟱";
 });
 
 categorySelect.addEventListener("change", async () => {
@@ -723,19 +699,28 @@ categorySelect.addEventListener("change", async () => {
 });
 
 searchInput.addEventListener("input", () => applyFilter());
-
 btnAutoLayout.addEventListener("click", () => doAutoLayout());
-btnClearCanvas.addEventListener("click", () => clearPlaced());
+
+btnClearCanvas.addEventListener("click", () => {
+  clearPlaced();
+  queue.clear();
+  renderQueue();
+});
 
 btnDownload.addEventListener("click", () => {
   if (!lastLayoutSvg) return;
   const w = mm(canvasW.value);
   const h = mm(canvasH.value);
-  const fname = `layout_${w}x${h}mm.svg`;
+  const totalObj = objCount.textContent;
+  const dateStr = new Date()
+    .toISOString()
+    .slice(0, 19)
+    .replace(/[:-]/g, "")
+    .replace("T", "_");
+  const fname = `Layout_${w}x${h}mm_${totalObj}pcs_${dateStr}.svg`;
   downloadTextFile(fname, lastLayoutSvg);
 });
 
-// update page rect on size change
 [canvasW, canvasH].forEach((inp) => {
   inp.addEventListener("change", () => updatePageRect());
 });
@@ -744,7 +729,6 @@ btnDownload.addEventListener("click", () => {
 (async function init() {
   updatePageRect();
   applyViewportTransform();
-
   try {
     await loadCategories();
     await loadFiles("all");
