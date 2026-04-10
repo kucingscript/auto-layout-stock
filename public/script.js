@@ -354,7 +354,7 @@ function parseLengthToMmClient(lenStr) {
   }
 }
 
-function isolateSvg(svgText, prefix, xMm, yMm, targetWMm, targetHMm) {
+function isolateSvg(svgText, prefix, xMm, yMm, origWMm, origHMm, isRotated = false) {
   const doc = new DOMParser().parseFromString(svgText, "image/svg+xml");
   const root = doc.documentElement;
 
@@ -421,8 +421,8 @@ function isolateSvg(svgText, prefix, xMm, yMm, targetWMm, targetHMm) {
 
   let vbX = 0,
     vbY = 0,
-    vbW = targetWMm,
-    vbH = targetHMm;
+    vbW = origWMm,
+    vbH = origHMm;
 
   const vb = root.getAttribute("viewBox");
 
@@ -443,7 +443,17 @@ function isolateSvg(svgText, prefix, xMm, yMm, targetWMm, targetHMm) {
     }
   }
 
-  return `<svg x="${xMm}" y="${yMm}" width="${targetWMm}" height="${targetHMm}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" overflow="visible">\n${innerContent}\n</svg>`;
+  if (isRotated) {
+    // Memutar 90 derajat searah jarum jam dengan center top-left koordinat yang baru
+    // Kita translate ke X yang baru lalu tambah tinggi aslinya, baru rotate 90.
+    return `<g transform="translate(${xMm + origHMm}, ${yMm}) rotate(90)">
+  <svg x="0" y="0" width="${origWMm}" height="${origHMm}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" overflow="visible">
+${innerContent}
+  </svg>
+</g>`;
+  } else {
+    return `<svg x="${xMm}" y="${yMm}" width="${origWMm}" height="${origHMm}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" overflow="visible">\n${innerContent}\n</svg>`;
+  }
 }
 
 function buildInstancesFromQueue() {
@@ -474,39 +484,106 @@ function buildInstancesFromQueue() {
 function packShelf(instances, pageW, pageH, spacing, margin) {
   const placements = [];
   const overflow = [];
-  let x = margin,
-    y = margin,
-    rowH = 0;
 
-  for (const inst of instances) {
-    const w = mm(inst.file.wMm);
-    const h = mm(inst.file.hMm);
+  // Urutkan algoritma First-Fit Decreasing (menggunakan area/dimensi maksimal terbesar ke terkecil)
+  const items = instances.map(inst => {
+    return {
+      inst,
+      w: mm(inst.file.wMm),
+      h: mm(inst.file.hMm),
+      maxSide: Math.max(mm(inst.file.wMm), mm(inst.file.hMm))
+    };
+  }).filter(item => {
+    if (item.w <= 0 || item.h <= 0) {
+      overflow.push({ inst: item.inst, reason: "invalid_size" });
+      return false;
+    }
+    const fitNormal = item.w <= pageW - margin * 2 && item.h <= pageH - margin * 2;
+    const fitRotated = item.h <= pageW - margin * 2 && item.w <= pageH - margin * 2;
+    if (!fitNormal && !fitRotated) {
+      overflow.push({ inst: item.inst, reason: "bigger_than_canvas" });
+      return false;
+    }
+    return true;
+  });
 
-    if (w <= 0 || h <= 0) {
-      overflow.push({ inst, reason: "invalid_size" });
-      continue;
+  items.sort((a, b) => b.maxSide - a.maxSide);
+
+  let unplaced = [...items];
+  let currentY = margin;
+
+  while (unplaced.length > 0) {
+    let currentX = margin;
+    let rowH = 0;
+    let placedInRow = [];
+
+    let progress = true;
+    while (progress) {
+      progress = false;
+
+      // Iterasi seluruh aset yang belum ditempatkan untuk mencari yang muat di sisa baris ini
+      for (let i = 0; i < unplaced.length; i++) {
+        const item = unplaced[i];
+        const needSpacing = currentX > margin;
+        const actualSpacing = needSpacing ? spacing : 0;
+        const availW = (pageW - margin) - (currentX + actualSpacing);
+        const isRowEmpty = placedInRow.length === 0;
+
+        // Coba orientasi Normal
+        if (item.w <= availW && (isRowEmpty || item.h <= rowH)) {
+          let checkPageFit = (currentY + (isRowEmpty ? item.h : rowH)) <= (pageH - margin);
+          if (checkPageFit) {
+            placements.push({ 
+              inst: item.inst, x: currentX + actualSpacing, y: currentY, 
+              w: item.w, h: item.h, 
+              originalW: item.w, originalH: item.h, 
+              isRotated: false 
+            });
+            placedInRow.push(item);
+            currentX += actualSpacing + item.w;
+            if (isRowEmpty) rowH = item.h;
+            unplaced.splice(i, 1);
+            progress = true;
+            break;
+          }
+        }
+
+        // Coba orientasi Rotated 90 Derajat (w dan h ditukar)
+        const rotW = item.h;
+        const rotH = item.w;
+        if (rotW <= availW && (isRowEmpty || rotH <= rowH)) {
+          let checkPageFit = (currentY + (isRowEmpty ? rotH : rowH)) <= (pageH - margin);
+          if (checkPageFit) {
+            placements.push({ 
+              inst: item.inst, x: currentX + actualSpacing, y: currentY, 
+              w: rotW, h: rotH, 
+              originalW: item.w, originalH: item.h, 
+              isRotated: true 
+            });
+            placedInRow.push(item);
+            currentX += actualSpacing + rotW;
+            if (isRowEmpty) rowH = rotH;
+            unplaced.splice(i, 1);
+            progress = true;
+            break;
+          }
+        }
+      }
     }
 
-    if (w > pageW - margin * 2 || h > pageH - margin * 2) {
-      overflow.push({ inst, reason: "bigger_than_canvas" });
-      continue;
+    // Jika tak satu pun muat di baris kosong, berarti page full
+    if (placedInRow.length === 0) {
+      break;
     }
 
-    if (x + w > pageW - margin) {
-      x = margin;
-      y = y + rowH + spacing;
-      rowH = 0;
-    }
-
-    if (y + h > pageH - margin) {
-      overflow.push({ inst, reason: "canvas_full" });
-      continue;
-    }
-
-    placements.push({ inst, x, y, w, h });
-    x = x + w + spacing;
-    rowH = Math.max(rowH, h);
+    currentY += rowH + spacing;
   }
+
+  // Sisa file yang tidak muat
+  unplaced.forEach(item => {
+    overflow.push({ inst: item.inst, reason: "canvas_full" });
+  });
+
   return { placements, overflow };
 }
 
@@ -523,13 +600,13 @@ function renderLayoutToPreview(placements, pageW, pageH) {
     const svgText = p.inst.svgText;
     const prefix = `i${count}_${Math.random().toString(36).slice(2, 8)}`;
 
-    // Dapatkan string Grup (<g>)
-    const isolatedGroupString = isolateSvg(svgText, prefix, p.x, p.y, p.w, p.h);
+    // Panggil isolateSvg dengan parameter orientasi asli dan isRotated
+    const isolatedGroupString = isolateSvg(svgText, prefix, p.x, p.y, p.originalW, p.originalH, p.isRotated);
 
     // Konversi string kembali menjadi DOM yang aman untuk preview
     const tempSvg = document.createElementNS(SVG_NS, "svg");
     tempSvg.innerHTML = isolatedGroupString;
-    const gNode = tempSvg.firstElementChild;
+    const gNode = tempSvg.firstElementChild; // Ini bisa jadi <g> jika dirotasi, atau <svg> jika tidak
 
     if (gNode) {
       gNode.setAttribute("data-name", file.name);
@@ -548,7 +625,7 @@ function buildExportSvgString(placements, pageW, pageH) {
 
   for (const p of placements) {
     const prefix = `e${count}_${Math.random().toString(36).slice(2, 8)}`;
-    body += `\n  ${isolateSvg(p.inst.svgText, prefix, p.x, p.y, p.w, p.h)}`;
+    body += `\n  ${isolateSvg(p.inst.svgText, prefix, p.x, p.y, p.originalW, p.originalH, p.isRotated)}`;
     count++;
   }
 
