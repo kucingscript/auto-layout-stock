@@ -107,9 +107,14 @@
         </div>
 
         <div class="bottom-right">
+          <button id="btnOpenUpload" class="btn btn-primary" style="align-self: flex-end;">Upload Images</button>
+
           <label class="field inline">
             <span>Category</span>
-            <select id="categorySelect"></select>
+            <div style="display: flex; gap: 6px;">
+              <select id="categorySelect"></select>
+              <button id="btnDeleteFolder" class="btn" style="border-color: rgba(255, 92, 122, 0.4); background: rgba(255, 92, 122, 0.1); color: #ff5c7a; padding: 6px 10px;" title="Hapus folder yang sedang dipilih">✕</button>
+            </div>
           </label>
 
           <label class="field inline">
@@ -124,6 +129,61 @@
         <div id="gallery" class="gallery"></div>
       </div>
     </section>
+  </div>
+
+  <!-- UPLOAD MODAL -->
+  <div id="uploadModal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Upload SVGs</div>
+        <button id="btnCloseUpload" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="upload-options">
+          <div class="block">
+            <div class="block-title">1. Pilih Folder Tujuan</div>
+            <div class="field" style="position: relative;">
+              <span>Folder (Pilih yang ada atau ketik baru)</span>
+              <input id="uploadFolderInput" type="text" placeholder="Ketik nama folder..." autocomplete="off" />
+              <div id="folderDropdown" class="custom-dropdown" hidden></div>
+            </div>
+          </div>
+
+          <div class="block">
+            <div class="block-title">2. Pilih File SVG</div>
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="fileInput" multiple accept=".svg" hidden />
+              <button id="btnSelectFiles" class="btn btn-primary">Pilih File...</button>
+              <p>Bisa pilih banyak file sekaligus</p>
+            </div>
+            <div id="uploadPreview" class="upload-preview"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnDoUpload" class="btn btn-success" disabled>Mulai Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DOWNLOAD FILENAME MODAL -->
+  <div id="downloadModal" class="modal-overlay" hidden>
+    <div class="modal" style="max-width: 420px;">
+      <div class="modal-header">
+        <div class="modal-title">Simpan Layout</div>
+        <button id="btnCloseDownloadModal" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <span>Konfirmasi Nama File</span>
+          <input id="filenameInput" type="text" placeholder="Masukkan nama file..." />
+          <small>Ekstensi .svg akan ditambahkan otomatis</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnConfirmDownload" class="btn btn-success">Download</button>
+      </div>
+    </div>
   </div>
 
   <div id="toast" class="toast" hidden></div>

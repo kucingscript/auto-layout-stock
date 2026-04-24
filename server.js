@@ -3,11 +3,33 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
+const multer = require("multer");
 const PORT = 3000;
 
 const ROOT_DIR = __dirname;
 const SVGS_DIR = path.join(ROOT_DIR, "svgs");
 
+// Multer storage configuration
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const folderName = req.body.folderName || "";
+    const targetDir = path.join(SVGS_DIR, folderName);
+    
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    cb(null, targetDir);
+  },
+  filename: function (req, file, cb) {
+    // Keep original filename
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage });
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(ROOT_DIR, "public")));
 app.use("/svgs", express.static(SVGS_DIR)); // untuk akses file svg (dibatasi oleh folder svgs)
 
@@ -205,6 +227,44 @@ app.get("/api/svg", (req, res) => {
     res.send(fs.readFileSync(abs, "utf8"));
   } catch (e) {
     res.status(400).send(String(e));
+  }
+});
+
+app.post("/api/upload", upload.array("files"), (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded" });
+    }
+    res.json({ 
+      message: "Files uploaded successfully", 
+      count: req.files.length,
+      folder: req.body.folderName 
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.delete("/api/delete", (req, res) => {
+  try {
+    const rel = (req.query.path || "").toString();
+    if (!rel) return res.status(400).json({ error: "Path required" });
+    
+    const abs = safeJoinUnderSvgs(rel);
+    if (!fs.existsSync(abs)) return res.status(404).json({ error: "Not found" });
+    
+    const stats = fs.statSync(abs);
+    if (stats.isDirectory()) {
+      // Hapus folder beserta isinya
+      fs.rmSync(abs, { recursive: true, force: true });
+    } else {
+      // Hapus file tunggal
+      fs.unlinkSync(abs);
+    }
+
+    res.json({ message: "Deleted successfully", path: rel });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
   }
 });
 

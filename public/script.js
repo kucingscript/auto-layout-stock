@@ -22,11 +22,29 @@ const marginMm = document.getElementById("marginMm");
 const btnAutoLayout = document.getElementById("btnAutoLayout");
 const btnClearCanvas = document.getElementById("btnClearCanvas");
 const btnDownload = document.getElementById("btnDownload");
+const btnDeleteFolder = document.getElementById("btnDeleteFolder");
 
 const objCount = document.getElementById("objCount");
 const zoomLabel = document.getElementById("zoomLabel");
 
 const toast = document.getElementById("toast");
+
+// Upload Modal DOM
+const btnOpenUpload = document.getElementById("btnOpenUpload");
+const uploadModal = document.getElementById("uploadModal");
+const btnCloseUpload = document.getElementById("btnCloseUpload");
+const uploadFolderInput = document.getElementById("uploadFolderInput");
+const folderDropdown = document.getElementById("folderDropdown");
+const fileInput = document.getElementById("fileInput");
+const btnSelectFiles = document.getElementById("btnSelectFiles");
+const uploadPreview = document.getElementById("uploadPreview");
+const btnDoUpload = document.getElementById("btnDoUpload");
+
+// Download Modal DOM
+const downloadModal = document.getElementById("downloadModal");
+const btnCloseDownloadModal = document.getElementById("btnCloseDownloadModal");
+const filenameInput = document.getElementById("filenameInput");
+const btnConfirmDownload = document.getElementById("btnConfirmDownload");
 
 // SVG stage
 const stage = document.getElementById("stage");
@@ -38,6 +56,8 @@ const placedGroup = document.getElementById("placed");
 let allFiles = [];
 let filteredFiles = [];
 let queue = new Map();
+let selectedUploadFiles = [];
+let availableFolders = [];
 
 let lastLayoutSvg = null;
 
@@ -125,6 +145,8 @@ async function fetchText(url) {
 async function loadCategories() {
   const data = await fetchJSON("/api/categories");
   categorySelect.innerHTML = "";
+  availableFolders = (data.categories || []).filter(c => c !== "all");
+
   for (const c of data.categories) {
     const opt = document.createElement("option");
     opt.value = c;
@@ -203,10 +225,42 @@ async function renderGallery(files) {
     card.appendChild(imgWrap);
     card.appendChild(name);
     card.appendChild(meta);
+
+    // DELETE BUTTON
+    const delBtn = document.createElement("button");
+    delBtn.className = "card-del";
+    delBtn.innerHTML = "✕";
+    delBtn.title = "Hapus file dari local";
+    delBtn.onclick = (e) => {
+      e.stopPropagation(); // Jangan tambah ke queue
+      confirmDelete(f);
+    };
+    card.appendChild(delBtn);
+
     card.addEventListener("click", () => addToQueue(f));
     frag.appendChild(card);
   }
   gallery.appendChild(frag);
+}
+
+async function confirmDelete(file) {
+  if (!confirm(`Hapus file "${file.name}" secara permanen dari server?`)) return;
+
+  try {
+    const res = await fetch(`/api/delete?path=${encodeURIComponent(file.relPath)}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || "Gagal menghapus file");
+
+    showToast(`✅ File terhapus: ${file.name}`);
+    
+    // Refresh gallery
+    await loadFiles(categorySelect.value);
+  } catch (err) {
+    showToast(`❌ Error: ${err.message}`);
+  }
 }
 
 // ---------------------- Queue ----------------------
@@ -271,11 +325,15 @@ function renderQueue() {
     input.min = "0";
     input.step = "1";
     input.value = String(item.pcs);
-    input.addEventListener("change", () => {
+    input.addEventListener("input", () => {
       const v = Math.max(0, parseInt(input.value || "0", 10));
       item.pcs = isFinite(v) ? v : 0;
-      if (item.pcs <= 0) queue.delete(file.id);
-      renderQueue();
+    });
+    input.addEventListener("blur", () => {
+      if (item.pcs <= 0) {
+        queue.delete(file.id);
+        renderQueue();
+      }
     });
     pcs.appendChild(input);
 
@@ -527,12 +585,11 @@ function packShelf(instances, pageW, pageH, spacing, margin) {
         const needSpacing = currentX > margin;
         const actualSpacing = needSpacing ? spacing : 0;
         const availW = (pageW - margin) - (currentX + actualSpacing);
-        const isRowEmpty = placedInRow.length === 0;
 
         // Coba orientasi Normal
-        if (item.w <= availW && (isRowEmpty || item.h <= rowH)) {
-          let checkPageFit = (currentY + (isRowEmpty ? item.h : rowH)) <= (pageH - margin);
-          if (checkPageFit) {
+        if (item.w <= availW) {
+          const potentialRowH = Math.max(rowH, item.h);
+          if (currentY + potentialRowH <= (pageH - margin)) {
             placements.push({ 
               inst: item.inst, x: currentX + actualSpacing, y: currentY, 
               w: item.w, h: item.h, 
@@ -541,7 +598,7 @@ function packShelf(instances, pageW, pageH, spacing, margin) {
             });
             placedInRow.push(item);
             currentX += actualSpacing + item.w;
-            if (isRowEmpty) rowH = item.h;
+            rowH = potentialRowH;
             unplaced.splice(i, 1);
             progress = true;
             break;
@@ -551,9 +608,9 @@ function packShelf(instances, pageW, pageH, spacing, margin) {
         // Coba orientasi Rotated 90 Derajat (w dan h ditukar)
         const rotW = item.h;
         const rotH = item.w;
-        if (rotW <= availW && (isRowEmpty || rotH <= rowH)) {
-          let checkPageFit = (currentY + (isRowEmpty ? rotH : rowH)) <= (pageH - margin);
-          if (checkPageFit) {
+        if (rotW <= availW) {
+          const potentialRowH = Math.max(rowH, rotH);
+          if (currentY + potentialRowH <= (pageH - margin)) {
             placements.push({ 
               inst: item.inst, x: currentX + actualSpacing, y: currentY, 
               w: rotW, h: rotH, 
@@ -562,7 +619,7 @@ function packShelf(instances, pageW, pageH, spacing, margin) {
             });
             placedInRow.push(item);
             currentX += actualSpacing + rotW;
-            if (isRowEmpty) rowH = rotH;
+            rowH = potentialRowH;
             unplaced.splice(i, 1);
             progress = true;
             break;
@@ -772,7 +829,34 @@ btnCollapseBottom.addEventListener("click", () => {
 
 categorySelect.addEventListener("change", async () => {
   searchInput.value = "";
+  // Check if "all" or valid folder
+  btnDeleteFolder.hidden = (categorySelect.value === "all");
   await loadFiles(categorySelect.value);
+});
+
+btnDeleteFolder.addEventListener("click", async () => {
+  const folder = categorySelect.value;
+  if (!folder || folder === "all") return;
+
+  if (!confirm(`⚠️ PERINGATAN: Hapus seluruh folder "${folder}" beserta ISINYA?\nTindakan ini tidak bisa dibatalkan.`)) return;
+
+  try {
+    const res = await fetch(`/api/delete?path=${encodeURIComponent(folder)}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Gagal menghapus folder");
+
+    showToast(`✅ Folder "${folder}" telah dihapus.`);
+    
+    // Refresh UI
+    await loadCategories();
+    categorySelect.value = "all";
+    btnDeleteFolder.hidden = true;
+    await loadFiles("all");
+  } catch (err) {
+    showToast(`❌ Error: ${err.message}`);
+  }
 });
 
 searchInput.addEventListener("input", () => applyFilter());
@@ -794,8 +878,185 @@ btnDownload.addEventListener("click", () => {
     .slice(0, 19)
     .replace(/[:-]/g, "")
     .replace("T", "_");
-  const fname = `Layout_${w}x${h}mm_${totalObj}pcs_${dateStr}.svg`;
+  
+  // Set default filename
+  const defaultName = `Layout_${w}x${h}mm_${totalObj}pcs_${dateStr}`;
+  filenameInput.value = defaultName;
+  
+  // Show modal
+  downloadModal.hidden = false;
+  filenameInput.focus();
+  filenameInput.select();
+});
+
+btnConfirmDownload.addEventListener("click", () => {
+  let fname = (filenameInput.value || "").trim();
+  if (!fname) return showToast("Nama file tidak boleh kosong");
+  
+  if (!fname.toLowerCase().endsWith(".svg")) {
+    fname += ".svg";
+  }
+  
   downloadTextFile(fname, lastLayoutSvg);
+  downloadModal.hidden = true;
+  showToast(`✅ File tersimpan: ${fname}`);
+});
+
+btnCloseDownloadModal.addEventListener("click", () => {
+  downloadModal.hidden = true;
+});
+
+// Close when clicking backdrop for download modal
+downloadModal.addEventListener("click", (e) => {
+  if (e.target === downloadModal) {
+    downloadModal.hidden = true;
+  }
+});
+
+// Handle Enter key in filename input
+filenameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    btnConfirmDownload.click();
+  }
+});
+
+// ---------------------- Upload Logic ----------------------
+btnOpenUpload.addEventListener("click", () => {
+  uploadModal.hidden = false;
+  selectedUploadFiles = [];
+  uploadFolderInput.value = "";
+  renderUploadPreview();
+});
+
+btnCloseUpload.addEventListener("click", () => {
+  uploadModal.hidden = true;
+});
+
+// Custom Dropdown Logic
+function renderFolderDropdown(filter = "") {
+  const q = filter.toLowerCase();
+  const matches = availableFolders.filter(f => f.toLowerCase().includes(q));
+  
+  if (matches.length === 0) {
+    folderDropdown.hidden = true;
+    return;
+  }
+
+  folderDropdown.innerHTML = "";
+  matches.forEach(name => {
+    const item = document.createElement("div");
+    item.className = "dropdown-item";
+    item.textContent = name;
+    item.onclick = () => {
+      uploadFolderInput.value = name;
+      folderDropdown.hidden = true;
+    };
+    folderDropdown.appendChild(item);
+  });
+  folderDropdown.hidden = false;
+}
+
+uploadFolderInput.addEventListener("input", () => {
+  renderFolderDropdown(uploadFolderInput.value);
+});
+
+uploadFolderInput.addEventListener("focus", () => {
+  renderFolderDropdown(uploadFolderInput.value);
+});
+
+// Close dropdown when clicking outside
+document.addEventListener("click", (e) => {
+  if (e.target !== uploadFolderInput && !folderDropdown.contains(e.target)) {
+    folderDropdown.hidden = true;
+  }
+});
+
+// Close when clicking backdrop
+uploadModal.addEventListener("click", (e) => {
+  if (e.target === uploadModal) {
+    uploadModal.hidden = true;
+  }
+});
+
+btnSelectFiles.addEventListener("click", () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener("change", (e) => {
+  const files = Array.from(e.target.files);
+  for (const f of files) {
+    if (!selectedUploadFiles.find(sf => sf.name === f.name)) {
+      selectedUploadFiles.push(f);
+    }
+  }
+  fileInput.value = ""; // reset so same file can be picked again if removed
+  renderUploadPreview();
+});
+
+function renderUploadPreview() {
+  uploadPreview.innerHTML = "";
+  selectedUploadFiles.forEach((file, index) => {
+    const item = document.createElement("div");
+    item.className = "up-item";
+    
+    const img = document.createElement("img");
+    const reader = new FileReader();
+    reader.onload = (e) => img.src = e.target.result;
+    reader.readAsDataURL(file);
+    item.appendChild(img);
+
+    const btn = document.createElement("button");
+    btn.className = "up-remove";
+    btn.textContent = "✕";
+    btn.onclick = () => {
+      selectedUploadFiles.splice(index, 1);
+      renderUploadPreview();
+    };
+    item.appendChild(btn);
+    uploadPreview.appendChild(item);
+  });
+  btnDoUpload.disabled = selectedUploadFiles.length === 0;
+}
+
+btnDoUpload.addEventListener("click", async () => {
+  const folder = (uploadFolderInput.value || "").trim();
+  if (!folder) {
+    showToast("Tolong pilih atau ketik nama folder tujuan.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("folderName", folder);
+  selectedUploadFiles.forEach(f => {
+    formData.append("files", f);
+  });
+
+  try {
+    btnDoUpload.disabled = true;
+    btnDoUpload.textContent = "Uploading...";
+    
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData
+    });
+    const data = await res.json();
+    
+    if (!res.ok) throw new Error(data.error || "Upload failed");
+
+    showToast(`✅ Berhasil upload ${data.count} file ke ${data.folder}`);
+    uploadModal.hidden = true;
+    
+    // Refresh
+    await loadCategories();
+    categorySelect.value = data.folder || "all";
+    await loadFiles(categorySelect.value);
+    
+  } catch (err) {
+    showToast(`❌ Error: ${err.message}`);
+  } finally {
+    btnDoUpload.disabled = false;
+    btnDoUpload.textContent = "Mulai Upload";
+  }
 });
 
 [canvasW, canvasH].forEach((inp) => {
@@ -808,6 +1069,7 @@ btnDownload.addEventListener("click", () => {
   applyViewportTransform();
   try {
     await loadCategories();
+    btnDeleteFolder.hidden = (categorySelect.value === "all");
     await loadFiles("all");
     renderQueue();
     showToast("Ready. Pilih SVG dari panel bawah lalu masuk queue.");
