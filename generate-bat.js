@@ -12,6 +12,9 @@ cd /d "${projectDir}"
 echo === Git Pull ===
 git pull
 
+echo === NPM Install ===
+npm install
+
 echo === NPM Start ===
 npm start
 
